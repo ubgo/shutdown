@@ -1,7 +1,6 @@
 package shutdown
 
 import (
-	"context"
 	"log/slog"
 )
 
@@ -52,7 +51,3 @@ func SlogLogger(l *slog.Logger) Logger {
 func NoopLogger() Logger {
 	return noopLogger{}
 }
-
-// ctxKeyLoggerForHandler is unused but reserved — future versions may pass
-// a per-handler logger via context.
-var _ = context.Background

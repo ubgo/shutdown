@@ -42,20 +42,11 @@ func (m *Manager) runPhase(parent context.Context, phase Phase, regs []registrat
 		wg.Wait()
 	}
 
-	// Aggregate, filtering by required-ness per ErrorPolicy semantics.
 	out := []error{}
-	for i, err := range results {
+	for _, err := range results {
 		if err == nil {
 			continue
 		}
-		if regs[i].required {
-			// Required handler errors always count.
-			out = append(out, err)
-			continue
-		}
-		// Non-required handler error: still aggregate by default
-		// (ContinueOnError); under StopOnError the runner will halt
-		// further phases anyway, so still reporting these is useful.
 		out = append(out, err)
 	}
 	return out

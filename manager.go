@@ -75,17 +75,16 @@ func (m *Manager) Subscribe(o Observer) {
 
 // OnSignal registers a hook for a non-shutdown signal (e.g. SIGHUP for
 // config reload, SIGUSR1 for log rotation). When the signal arrives the
-// hook is invoked with a fresh context derived from the Listen ctx; the
-// shutdown sequence is NOT triggered.
+// hook is invoked with the Listen ctx; the shutdown sequence is NOT
+// triggered, and Listen continues waiting for further signals.
 //
-// Pass shutdown.ContinueListening to stay in the signal loop after the
-// hook returns; the manager keeps listening for further signals (including
-// SIGTERM/SIGINT) until either Listen's ctx cancels or a shutdown signal
-// arrives. The default behaviour is ContinueListening.
+// The signal is automatically added to the listened set, so callers do
+// not need to also include it in WithSignals.
 //
 // Note: signals registered here are no longer treated as shutdown triggers
 // by the manager. If a user adds SIGTERM via OnSignal it will not start a
-// shutdown — it will only call the user's hook.
+// shutdown — it will only call the user's hook. To restore shutdown
+// behaviour for that signal, simply do not register a hook for it.
 func (m *Manager) OnSignal(sig os.Signal, fn func(ctx context.Context, sig os.Signal)) {
 	m.signalHooksMu.Lock()
 	defer m.signalHooksMu.Unlock()
@@ -103,11 +102,16 @@ func (m *Manager) OnSignal(sig os.Signal, fn func(ctx context.Context, sig os.Si
 // os.Exit(forceCode) when WithForceOnSecondSignal is enabled (default).
 //
 // Listen is safe to call once per Manager; subsequent calls return ErrClosed.
+//
+// Signals registered via OnSignal are automatically added to the listened
+// set, so callers do not need to also include them in WithSignals — a hook
+// for SIGHUP without WithSignals(syscall.SIGHUP, ...) still fires.
 func (m *Manager) Listen(ctx context.Context) error {
 	signals := append([]os.Signal{}, m.cfg.signals...)
 	if len(signals) == 0 {
 		signals = []os.Signal{syscall.SIGINT, syscall.SIGTERM}
 	}
+	signals = m.appendHookSignals(signals)
 
 	sigCh := make(chan os.Signal, 4)
 	signal.Notify(sigCh, signals...)
@@ -305,4 +309,29 @@ func sortedPhases(buckets map[Phase][]registration) []Phase {
 	}
 	sort.Slice(phases, func(i, j int) bool { return phases[i] < phases[j] })
 	return phases
+}
+
+// appendHookSignals merges any signals registered via OnSignal into base,
+// deduplicating. Without this, a hook for a signal not also passed to
+// WithSignals would never fire because signal.Notify wouldn't be watching
+// for it.
+func (m *Manager) appendHookSignals(base []os.Signal) []os.Signal {
+	m.signalHooksMu.RLock()
+	defer m.signalHooksMu.RUnlock()
+	if len(m.signalHooks) == 0 {
+		return base
+	}
+	have := make(map[os.Signal]struct{}, len(base))
+	for _, s := range base {
+		have[s] = struct{}{}
+	}
+	out := base
+	for s := range m.signalHooks {
+		if _, ok := have[s]; ok {
+			continue
+		}
+		out = append(out, s)
+		have[s] = struct{}{}
+	}
+	return out
 }

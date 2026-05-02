@@ -268,6 +268,49 @@ func TestShutdown_HandlerPanic_DoesNotBubble(t *testing.T) {
 	_ = m.Shutdown(context.Background())
 }
 
+func TestShutdown_HandlerPanic_SurfacesAsError(t *testing.T) {
+	m := New(WithLogger(NoopLogger()), WithBudget(2*time.Second))
+	_ = m.Register("panicky", func(_ context.Context) error {
+		panic("boom")
+	})
+
+	err := m.Shutdown(context.Background())
+	if err == nil {
+		t.Fatal("expected aggregated error from panicking handler")
+	}
+	var pe *PanicError
+	if !errors.As(err, &pe) {
+		t.Fatalf("err = %v, want PanicError", err)
+	}
+	if pe.Name != "panicky" {
+		t.Errorf("PanicError.Name = %q", pe.Name)
+	}
+	if !contains(pe.Error(), "boom") {
+		t.Errorf("PanicError.Error() = %q, want it to contain 'boom'", pe.Error())
+	}
+}
+
+func TestShutdown_HandlerPanic_NonStringValue(t *testing.T) {
+	m := New(WithLogger(NoopLogger()), WithBudget(2*time.Second))
+	_ = m.Register("panicky-err", func(_ context.Context) error {
+		panic(errors.New("structured panic"))
+	})
+	_ = m.Register("panicky-int", func(_ context.Context) error {
+		panic(42)
+	})
+
+	err := m.Shutdown(context.Background())
+	if err == nil {
+		t.Fatal("expected aggregated error")
+	}
+	if !contains(err.Error(), "structured panic") {
+		t.Errorf("error panic value: %q", err.Error())
+	}
+	if !contains(err.Error(), "non-string panic value") {
+		t.Errorf("non-string panic should fall through: %q", err.Error())
+	}
+}
+
 func TestRegister_AfterShutdown_Fails(t *testing.T) {
 	m := New(WithLogger(NoopLogger()), WithBudget(2*time.Second))
 	_ = m.Register("a", func(_ context.Context) error { return nil })

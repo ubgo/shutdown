@@ -12,16 +12,17 @@ type Option func(*config)
 // config is the internal Manager configuration. All fields populated by
 // New from defaultConfig and any user-supplied Options.
 type config struct {
-	logger              Logger
-	signals             []os.Signal
-	budget              time.Duration
-	errorPolicy         ErrorPolicy
-	forceOnSecondSignal bool
-	forceExitCode       int
-	exitOnComplete      bool
-	successExitCode     int
-	failureExitCode     int
-	serialPhases        map[Phase]bool
+	logger                Logger
+	signals               []os.Signal
+	budget                time.Duration
+	handlerDefaultTimeout time.Duration
+	errorPolicy           ErrorPolicy
+	forceOnSecondSignal   bool
+	forceExitCode         int
+	exitOnComplete        bool
+	successExitCode       int
+	failureExitCode       int
+	serialPhases          map[Phase]bool
 
 	// Test seam. Defaults to os.Exit; tests inject a recording function.
 	exitFn func(code int)
@@ -32,17 +33,18 @@ type config struct {
 
 func defaultConfig() config {
 	return config{
-		signals:             []os.Signal{syscall.SIGINT, syscall.SIGTERM},
-		budget:              30 * time.Second,
-		errorPolicy:         ContinueOnError,
-		forceOnSecondSignal: true,
-		forceExitCode:       130, // 128 + SIGINT, the conventional shell code
-		exitOnComplete:      false,
-		successExitCode:     0,
-		failureExitCode:     1,
-		serialPhases:        map[Phase]bool{},
-		exitFn:              os.Exit,
-		watchdogGrace:       1 * time.Second,
+		signals:               []os.Signal{syscall.SIGINT, syscall.SIGTERM},
+		budget:                30 * time.Second,
+		handlerDefaultTimeout: 5 * time.Second,
+		errorPolicy:           ContinueOnError,
+		forceOnSecondSignal:   true,
+		forceExitCode:         130, // 128 + SIGINT, the conventional shell code
+		exitOnComplete:        false,
+		successExitCode:       0,
+		failureExitCode:       1,
+		serialPhases:          map[Phase]bool{},
+		exitFn:                os.Exit,
+		watchdogGrace:         1 * time.Second,
 	}
 }
 
@@ -68,6 +70,12 @@ func WithSignals(sigs ...os.Signal) Option {
 // WithWatchdogGrace). Default: 30s.
 func WithBudget(d time.Duration) Option {
 	return func(c *config) { c.budget = d }
+}
+
+// WithHandlerDefaultTimeout sets the default per-handler timeout used when
+// a Register call does not pass WithTimeout. Default: 5s.
+func WithHandlerDefaultTimeout(d time.Duration) Option {
+	return func(c *config) { c.handlerDefaultTimeout = d }
 }
 
 // WithWatchdogGrace sets the grace period after the budget expires before

@@ -112,6 +112,36 @@ func TestListen_ForceExitOnSecondSignal(t *testing.T) {
 	}
 }
 
+func TestListen_OnSignalAutoIncludesUnlistedSignal(t *testing.T) {
+	// Register OnSignal for SIGUSR2 without including it in WithSignals —
+	// the manager must add it to the listened set automatically so the hook
+	// actually fires.
+	m := New(WithLogger(NoopLogger()), WithBudget(1*time.Second))
+
+	hookFired := atomic.Int32{}
+	m.OnSignal(syscall.SIGUSR2, func(_ context.Context, _ os.Signal) {
+		hookFired.Add(1)
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- m.Listen(ctx) }()
+
+	time.Sleep(20 * time.Millisecond)
+	p, _ := os.FindProcess(os.Getpid())
+	_ = p.Signal(syscall.SIGUSR2)
+
+	err := <-done
+	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		t.Errorf("Listen: got %v, want ctx error", err)
+	}
+	if hookFired.Load() == 0 {
+		t.Fatal("OnSignal hook for unlisted signal did not fire — auto-include broken")
+	}
+}
+
 func TestListen_OnSignalHookFiresWithoutShutdown(t *testing.T) {
 	m := New(WithLogger(NoopLogger()), WithBudget(1*time.Second))
 
@@ -171,14 +201,31 @@ func TestWatchdog_ForceExitsOnBudgetOverrun(t *testing.T) {
 	}
 }
 
-func TestWithRequired_AffectsRegistration(t *testing.T) {
-	m := New(WithLogger(NoopLogger()), WithBudget(1*time.Second))
-	if err := m.Register("req", func(_ context.Context) error { return nil }, WithRequired()); err != nil {
-		t.Fatalf("Register required: %v", err)
+func TestWithHandlerDefaultTimeout_OverridesBaseline(t *testing.T) {
+	m := New(
+		WithLogger(NoopLogger()),
+		WithBudget(2*time.Second),
+		WithHandlerDefaultTimeout(40*time.Millisecond),
+	)
+	// Handler that respects ctx — should be cancelled by the default timeout
+	// (40ms) before its 500ms work completes.
+	if err := m.Register("slow", func(ctx context.Context) error {
+		select {
+		case <-time.After(500 * time.Millisecond):
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
 	}
-	// Just verify it accepted the option without error and the handler runs.
-	if err := m.Shutdown(context.Background()); err != nil {
-		t.Errorf("Shutdown: %v", err)
+	start := time.Now()
+	err := m.Shutdown(context.Background())
+	if err == nil {
+		t.Fatal("expected timeout error from default handler timeout")
+	}
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+		t.Errorf("WithHandlerDefaultTimeout did not apply: shutdown took %v", elapsed)
 	}
 }
 
@@ -191,7 +238,8 @@ func TestPhase_StringCoverage(t *testing.T) {
 		PhaseCloseClients:  "CloseClients",
 		PhaseFlushLogs:     "FlushLogs",
 		PhasePostShutdown:  "PostShutdown",
-		Phase(42):          "phase=custom",
+		Phase(42):          "phase=42",
+		Phase(-7):          "phase=-7",
 	}
 	for p, want := range cases {
 		if got := p.String(); got != want {

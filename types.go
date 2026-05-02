@@ -2,6 +2,7 @@ package shutdown
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 )
@@ -64,7 +65,7 @@ func (p Phase) String() string {
 	case PhasePostShutdown:
 		return "PostShutdown"
 	default:
-		return "phase=custom"
+		return fmt.Sprintf("phase=%d", int(p))
 	}
 }
 

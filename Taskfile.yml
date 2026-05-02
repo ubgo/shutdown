@@ -1,0 +1,68 @@
+version: '3'
+
+# Reusable command runner for the ubgo/shutdown repo.
+# Run `task --list` to see all available tasks.
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  test:
+    desc: Run all tests
+    cmds:
+      - go test ./...
+
+  test:race:
+    desc: Run all tests with the race detector
+    cmds:
+      - go test -race ./...
+
+  test:coverage:
+    desc: Run tests with coverage report
+    cmds:
+      - go test -race -coverprofile=cover.out ./...
+      - go tool cover -html=cover.out -o cover.html
+      - echo "Coverage report written to cover.html"
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run ./...
+
+  tidy:
+    desc: Run go mod tidy on every module
+    cmds:
+      - find . -name go.mod -execdir go mod tidy \;
+
+  zero-dep-check:
+    desc: Verify the core has zero non-stdlib dependencies
+    cmds:
+      - |
+        if grep -E '^require\s+[^(]' go.mod | grep -v 'github.com/ubgo'; then
+          echo "shutdown core has 3rd-party deps — forbidden"
+          exit 1
+        fi
+        echo "ok: zero non-stdlib deps in core"
+
+  build:
+    desc: Compile-check
+    cmds:
+      - go build ./...
+
+  ci:
+    desc: Full local CI suite
+    cmds:
+      - task: vet
+      - task: test:race
+      - task: zero-dep-check
+
+  clean:
+    cmds:
+      - rm -f cover.out cover.html

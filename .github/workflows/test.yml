@@ -1,0 +1,91 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - .
+          - contrib/health-nethttp
+          - contrib/health-gin
+          - contrib/health-chi
+          - contrib/health-echo
+          - contrib/health-fiber
+          - contrib/health-otel
+          - contrib/health-prom
+          - contrib/health-postgres
+          - contrib/health-redis
+          - contrib/health-nats
+          - contrib/health-httpprobe
+          - contrib/health-dns
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.24"
+          cache: true
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+
+      - name: vet
+        working-directory: ${{ matrix.module }}
+        run: go vet ./...
+
+      - name: test (race + coverage)
+        working-directory: ${{ matrix.module }}
+        run: go test -race -coverprofile=cover.out ./...
+
+      - name: sanitise module path for artifact name
+        id: artifact
+        run: echo "name=cover-$(echo '${{ matrix.module }}' | tr '/' '-')" >> "$GITHUB_OUTPUT"
+
+      - name: upload coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: ${{ matrix.module }}/cover.out
+          if-no-files-found: ignore
+
+  zero-dep-gate:
+    name: zero-dep gate (core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: assert core has no non-stdlib deps
+        run: |
+          if grep -E '^require\s+[^(]' go.mod | grep -v 'github.com/ubgo'; then
+            echo "buildinfo core has 3rd-party deps — forbidden"
+            exit 1
+          fi
+          echo "ok: zero non-stdlib deps in core"
+
+  tidy-check:
+    name: tidy check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.24"
+
+      - name: assert go.mod / go.sum are tidy
+        run: |
+          go mod tidy
+          if [ -n "$(git status --porcelain go.mod go.sum 2>/dev/null)" ]; then
+            echo "go.mod or go.sum drifted — run 'go mod tidy'"
+            git diff -- go.mod go.sum 2>/dev/null || true
+            exit 1
+          fi

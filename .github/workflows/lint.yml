@@ -11,6 +11,19 @@ permissions:
 jobs:
   golangci-lint:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - .
+          - contrib/shutdown-nethttp
+          - contrib/shutdown-gin
+          - contrib/shutdown-chi
+          - contrib/shutdown-echo
+          - contrib/shutdown-fiber
+          - contrib/shutdown-zap
+          - contrib/shutdown-otel
+          - contrib/shutdown-prom
     steps:
       - uses: actions/checkout@v6
 
@@ -22,6 +35,7 @@ jobs:
         with:
           version: v2.12.0
           args: --timeout=5m
+          working-directory: ${{ matrix.module }}
 
   gofmt:
     runs-on: ubuntu-latest

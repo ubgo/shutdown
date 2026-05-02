@@ -1,3 +1,13 @@
 go 1.24
 
-use .
+use (
+	.
+	./contrib/shutdown-nethttp
+	./contrib/shutdown-gin
+	./contrib/shutdown-chi
+	./contrib/shutdown-echo
+	./contrib/shutdown-fiber
+	./contrib/shutdown-zap
+	./contrib/shutdown-otel
+	./contrib/shutdown-prom
+)

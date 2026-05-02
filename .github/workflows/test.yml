@@ -17,7 +17,14 @@ jobs:
       matrix:
         module:
           - .
-          # contrib/* modules will be added here as they ship.
+          - contrib/shutdown-nethttp
+          - contrib/shutdown-gin
+          - contrib/shutdown-chi
+          - contrib/shutdown-echo
+          - contrib/shutdown-fiber
+          - contrib/shutdown-zap
+          - contrib/shutdown-otel
+          - contrib/shutdown-prom
     steps:
       - uses: actions/checkout@v6
 
@@ -55,7 +62,7 @@ jobs:
       - name: assert core has no non-stdlib deps
         run: |
           if grep -E '^require\s+[^(]' go.mod | grep -v 'github.com/ubgo'; then
-            echo "buildinfo core has 3rd-party deps — forbidden"
+            echo "shutdown core has 3rd-party deps — forbidden"
             exit 1
           fi
           echo "ok: zero non-stdlib deps in core"

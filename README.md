@@ -128,16 +128,14 @@ Adapter modules ship as separate Go modules under `contrib/`. Import only the on
 
 | Adapter | Module path | Role |
 |---------|-------------|------|
-| `shutdown-zap` | `github.com/ubgo/shutdown/contrib/shutdown-zap` | Zap `Logger` adapter |
-| `shutdown-slog` | `github.com/ubgo/shutdown/contrib/shutdown-slog` | Explicit `*slog.Logger` adapter |
-| `shutdown-otel` | `github.com/ubgo/shutdown/contrib/shutdown-otel` | OpenTelemetry spans per phase + handler |
-| `shutdown-prom` | `github.com/ubgo/shutdown/contrib/shutdown-prom` | Prometheus metrics |
-| `shutdown-health` | `github.com/ubgo/shutdown/contrib/shutdown-health` | Auto-flip `ubgo/health` readiness on PreShutdown |
-| `shutdown-nethttp` | `github.com/ubgo/shutdown/contrib/shutdown-nethttp` | `http.Server.Shutdown` registered handler |
-| `shutdown-gin` / `-chi` / `-echo` / `-fiber` | `…/contrib/shutdown-<framework>` | Framework-server shutdown helpers |
-| `shutdown-fx` | `github.com/ubgo/shutdown/contrib/shutdown-fx` | uber-go/fx lifecycle bridge |
-
-(Adapters land in subsequent releases; v0.1.0 ships the core only.)
+| [`shutdown-nethttp`](contrib/shutdown-nethttp) | `github.com/ubgo/shutdown/contrib/shutdown-nethttp` | `*http.Server.Shutdown` registered as a phase handler |
+| [`shutdown-gin`](contrib/shutdown-gin) | `github.com/ubgo/shutdown/contrib/shutdown-gin` | Same, for the `*http.Server` wrapping a Gin engine |
+| [`shutdown-chi`](contrib/shutdown-chi) | `github.com/ubgo/shutdown/contrib/shutdown-chi` | Same, for the `*http.Server` wrapping a Chi router |
+| [`shutdown-echo`](contrib/shutdown-echo) | `github.com/ubgo/shutdown/contrib/shutdown-echo` | `*echo.Echo.Shutdown` (Echo owns its server) |
+| [`shutdown-fiber`](contrib/shutdown-fiber) | `github.com/ubgo/shutdown/contrib/shutdown-fiber` | `*fiber.App.ShutdownWithContext` |
+| [`shutdown-zap`](contrib/shutdown-zap) | `github.com/ubgo/shutdown/contrib/shutdown-zap` | Observer that emits structured logs via `go.uber.org/zap` |
+| [`shutdown-otel`](contrib/shutdown-otel) | `github.com/ubgo/shutdown/contrib/shutdown-otel` | Observer that emits OpenTelemetry spans (root + phase + handler) |
+| [`shutdown-prom`](contrib/shutdown-prom) | `github.com/ubgo/shutdown/contrib/shutdown-prom` | Observer that exports Prometheus metrics |
 
 ## Comparison
 

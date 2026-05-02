@@ -20,13 +20,14 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // Observer returns an observer that emits OTEL spans through the provided
 // tracer. A nil tracer is replaced with a no-op tracer.
 func Observer(tracer trace.Tracer) shutdown.Observer {
 	if tracer == nil {
-		tracer = trace.NewNoopTracerProvider().Tracer("shutdown-otel")
+		tracer = noop.NewTracerProvider().Tracer("shutdown-otel")
 	}
 
 	state := &spanState{

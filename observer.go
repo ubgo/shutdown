@@ -1,16 +1,17 @@
-// observer.go — synchronous fan-out helpers for the Observer pattern.
-//
-// All fire* methods take a snapshot of the observer slice under the
-// manager's read lock before invoking, so a Subscribe call concurrent
-// with shutdown can't cause a torn iteration. Observers fire
-// synchronously: a slow observer slows shutdown — adapters that need
-// async work should fan out to a goroutine themselves.
 package shutdown
 
 import (
 	"os"
 	"time"
 )
+
+// Observer fan-out helpers.
+//
+// All fire* methods take a snapshot of the observer slice under the
+// manager's read lock before invoking, so a Subscribe call concurrent
+// with shutdown can't cause a torn iteration. Observers fire
+// synchronously: a slow observer slows shutdown — adapters that need
+// async work should fan out to a goroutine themselves.
 
 // fireOnSignal invokes each observer's OnSignal hook.
 func (m *Manager) fireOnSignal(sig os.Signal) {

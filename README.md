@@ -215,6 +215,33 @@ mgr := shutdown.New(
 
 This is the answer to "k8s SIGKILLs us at `terminationGracePeriodSeconds`": set the budget a few seconds shorter and exit clean before the kernel is involved.
 
+### Tuning the timeout cascade
+
+When you wrap a library that has its own internal deadline (e.g. `gocron.WithStopTimeout`, `redis.Options.PoolTimeout`, gRPC client `WithTimeout`), three layers compete:
+
+```
+[underlying lib's own deadline]   <   per-handler shutdown.WithTimeout   <   manager.WithBudget
+```
+
+Each layer must outlive the one below it. Reverse the order and you get bugs:
+
+| Mistake | What happens |
+|---------|--------------|
+| `WithBudget` < library's deadline | Watchdog hard-exits before the library finishes its drain. In-flight work killed; orchestrator sees a non-zero exit. |
+| `WithTimeout` < library's deadline | Manager cancels the per-handler context mid-call. The library's `Shutdown` returns `ctx.Err`; whatever it was draining keeps running in a goroutine no one is waiting on. |
+| Both equal | Race condition — sometimes works, sometimes the watchdog wins. |
+
+For typical service shapes:
+
+| Service | Library deadline | `WithTimeout` | `WithBudget` |
+|---------|------------------|---------------|--------------|
+| HTTP API + DB pool | n/a | 10–15s per handler | 30s |
+| HTTP API + slow downstream calls | call-level timeout (5–30s) | call timeout + 1s | 60s |
+| gocron with hour-long jobs | `WithStopTimeout(24h)` | `24h 30m` | `25h` |
+| Batch job that must not be interrupted | n/a | per-handler enough for cleanup | `WithBudget(0)` (disable; rely on orchestrator) |
+
+The 24-hour gocron case is shown end-to-end in [`shutdown-examples/11-cron-gocron`](https://github.com/ubgo/shutdown-examples/tree/main/11-cron-gocron).
+
 ## Adapters
 
 Adapter modules ship as separate Go modules under `contrib/`. Import only the ones you use; each pulls only its own dependencies.

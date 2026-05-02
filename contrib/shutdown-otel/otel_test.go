@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/ubgo/shutdown"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 )
 

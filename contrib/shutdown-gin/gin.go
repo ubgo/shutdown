@@ -32,7 +32,7 @@ type config struct {
 	timeout time.Duration
 }
 
-func WithName(s string) Option         { return func(c *config) { c.name = s } }
+func WithName(s string) Option          { return func(c *config) { c.name = s } }
 func WithPhase(p shutdown.Phase) Option { return func(c *config) { c.phase = p } }
 func WithTimeout(d time.Duration) Option {
 	return func(c *config) { c.timeout = d }

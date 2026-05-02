@@ -29,12 +29,12 @@ func TestObserver_FullLifecycle(t *testing.T) {
 
 	logs := recorded.All()
 	want := map[string]bool{
-		"shutdown: phase start":            false,
-		"shutdown: phase end":              false,
-		"shutdown: handler start":          false,
-		"shutdown: handler end":            false,
-		"shutdown: handler failed":         false,
-		"shutdown: completed with errors":  false,
+		"shutdown: phase start":           false,
+		"shutdown: phase end":             false,
+		"shutdown: handler start":         false,
+		"shutdown: handler end":           false,
+		"shutdown: handler failed":        false,
+		"shutdown: completed with errors": false,
 	}
 	for _, e := range logs {
 		if _, ok := want[e.Message]; ok {

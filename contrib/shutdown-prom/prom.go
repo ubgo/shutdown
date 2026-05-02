@@ -60,7 +60,7 @@ func Observer(m *Metrics) shutdown.Observer {
 		m = NewMetrics(nil)
 	}
 	return shutdown.Observer{
-		OnSignal: func(_ os.Signal) {},
+		OnSignal:     func(_ os.Signal) {},
 		OnPhaseStart: func(_ shutdown.Phase, _ int) {},
 		OnPhaseEnd: func(p shutdown.Phase, dur time.Duration, _ []error) {
 			m.PhaseDuration.WithLabelValues(p.String()).Observe(dur.Seconds())

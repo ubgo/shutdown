@@ -30,9 +30,9 @@ func Observer(tracer trace.Tracer) shutdown.Observer {
 	}
 
 	state := &spanState{
-		tracer:        tracer,
-		phaseSpans:    map[shutdown.Phase]trace.Span{},
-		phaseCtx:      map[shutdown.Phase]context.Context{},
+		tracer:       tracer,
+		phaseSpans:   map[shutdown.Phase]trace.Span{},
+		phaseCtx:     map[shutdown.Phase]context.Context{},
 		handlerSpans: map[handlerKey]trace.Span{},
 	}
 

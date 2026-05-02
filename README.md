@@ -2,7 +2,7 @@
 
 Phased, parallel-within-phase, observable graceful shutdown manager for long-running Go services. Designed for Kubernetes, systemd, and any orchestrator that delivers SIGTERM with a grace period.
 
-Zero third-party dependencies in the core. Adapter modules for Zap / slog / OpenTelemetry / Prometheus / `ubgo/health` / Gin / Chi / Echo / Fiber / `uber-go/fx` ship under `contrib/`.
+Zero third-party dependencies in the core. Eight adapter modules — five HTTP frameworks (`nethttp`, `gin`, `chi`, `echo`, `fiber`) and three observers (`zap`, `otel`, `prom`) — ship under `contrib/`. Each contrib is its own Go module so importing one doesn't pull in the others.
 
 ## Install
 
@@ -10,7 +10,7 @@ Zero third-party dependencies in the core. Adapter modules for Zap / slog / Open
 go get github.com/ubgo/shutdown
 ```
 
-## Quick start
+## Quick start — production-ready in 30 lines
 
 ```go
 package main
@@ -18,109 +18,202 @@ package main
 import (
     "context"
     "log"
+    "net/http"
     "time"
 
     "github.com/ubgo/shutdown"
+    shutdownnethttp "github.com/ubgo/shutdown/contrib/shutdown-nethttp"
 )
 
 func main() {
-    mgr := shutdown.New(
-        shutdown.WithBudget(30 * time.Second),
-    )
+    mgr := shutdown.New(shutdown.WithBudget(30 * time.Second))
 
-    mgr.Register("http",  httpServer.Shutdown,
-        shutdown.WithPhase(shutdown.PhaseStopAccepting))
-    mgr.Register("nats",  natsConn.Drain,
-        shutdown.WithPhase(shutdown.PhaseDrainTraffic))
-    mgr.Register("db",    db.Close,
-        shutdown.WithPhase(shutdown.PhaseCloseClients))
-    mgr.Register("redis", redisClient.Close,
-        shutdown.WithPhase(shutdown.PhaseCloseClients)) // parallel with db
-    mgr.Register("otel",  otelProvider.Shutdown,
-        shutdown.WithPhase(shutdown.PhaseFlushLogs))
+    // 1. HTTP server stops accepting first.
+    srv := &http.Server{Addr: ":8080", Handler: yourMux()}
+    _ = shutdownnethttp.Register(mgr, srv)
+
+    // 2. DB / cache / queue clients close after traffic drains.
+    _ = mgr.Register("db",    closeFn(db.Close),    shutdown.WithPhase(shutdown.PhaseCloseClients))
+    _ = mgr.Register("redis", closeFn(rdb.Close),   shutdown.WithPhase(shutdown.PhaseCloseClients))
+    _ = mgr.Register("nats",  closeFn(nc.Drain),    shutdown.WithPhase(shutdown.PhaseDrainTraffic))
+
+    // 3. OpenTelemetry flushes last so the prior phases' spans actually leave.
+    _ = mgr.Register("otel",  tp.Shutdown,          shutdown.WithPhase(shutdown.PhaseFlushLogs))
+
+    go func() { _ = srv.ListenAndServe() }()
 
     if err := mgr.Listen(context.Background()); err != nil {
         log.Fatal(err)
     }
 }
+
+// closeFn adapts a `func() error` Close method into the manager's
+// `func(ctx) error` HandlerFunc shape.
+func closeFn(fn func() error) shutdown.HandlerFunc {
+    return func(_ context.Context) error { return fn() }
+}
 ```
 
 `Listen` blocks until SIGTERM/SIGINT, then runs every registered handler in phase order. Handlers in the same phase run in parallel. The whole thing is bounded by `WithBudget`; a watchdog hard-exits if budget plus grace expires.
 
-## Phases
+## Strategy: which phase does each thing go in?
 
-The seven predefined phases match the typical k8s preStop drain pattern. Lower phases run first.
+The seven predefined phases match the typical Kubernetes preStop drain pattern. Lower phases run first. Within a phase, handlers run in parallel — order them across phases, not within.
 
-| Phase | Value | Typical handlers |
-|-------|-------|------------------|
-| `PhasePreShutdown` | -100 | flip drain flag (load balancer stops sending) |
-| `PhaseStopAccepting` | 0 | close HTTP listeners |
-| `PhaseDrainTraffic` | 100 | wait for in-flight requests; NATS drain |
-| `PhaseFlushQueues` | 200 | flush async producers, drain workers |
-| `PhaseCloseClients` | 300 | close DB / cache / messaging clients |
-| `PhaseFlushLogs` | 400 | flush logs and traces last |
-| `PhasePostShutdown` | 500 | final cleanup |
+| Phase | Value | What goes here | Common mistakes |
+|-------|-------|----------------|-----------------|
+| `PhasePreShutdown` | -100 | Flip readiness to Down so the load balancer stops sending. | Don't close anything yet; the LB still has a few seconds of in-flight traffic. |
+| `PhaseStopAccepting` | 0 | Close HTTP / gRPC listeners. | Don't drain in-flight here — that's the next phase. `srv.Shutdown` already does both, but contribs put it here so dependencies live to serve those drains. |
+| `PhaseDrainTraffic` | 100 | Wait for in-flight work to finish. NATS `Drain()`. Worker pools that own queue items. | Closing the DB here will fail in-flight requests. |
+| `PhaseFlushQueues` | 200 | Flush async producers (Kafka, log shippers, batchers). | Don't close the underlying client until next phase. |
+| `PhaseCloseClients` | 300 | Close DB / cache / messaging client connections. | Putting OTEL flush here loses spans for prior phases. |
+| `PhaseFlushLogs` | 400 | Flush logs and traces last so prior errors actually leave the process. | Closing the logger before this phase silences the rest of the shutdown. |
+| `PhasePostShutdown` | 500 | Final cleanup, exit-code reporting. | (Most apps don't need this.) |
 
-Phases are plain `int` — pass any value to `WithPhase` if you need finer-grained ordering.
+Phases are plain `int` — pass any value to `WithPhase` if you need finer-grained ordering between the predefined ones.
 
-## Force-exit on second signal
+## Recipes
 
-By default, a second SIGTERM/SIGINT during shutdown calls `os.Exit(130)` immediately — the operator's escape hatch when a handler hangs. Disable via `WithForceOnSecondSignal(false, 0)`.
-
-## Watchdog
-
-`WithBudget(d)` sets the total wall-clock budget. After the budget plus a 1-second grace period (configurable via `WithWatchdogGrace`), the watchdog calls `os.Exit(failureCode)` with the names of the stuck handlers logged. No more zombie processes.
-
-## Programmatic trigger
-
-Tests, panic-recovery middleware, custom HTTP `/admin/shutdown` endpoints, and `health` failure paths can all trigger shutdown without an OS signal:
+### HTTP server with database and Redis
 
 ```go
-err := mgr.Shutdown(ctx)
+mgr := shutdown.New(shutdown.WithBudget(30 * time.Second))
+
+srv := &http.Server{Addr: ":8080", Handler: r}
+_ = shutdownnethttp.Register(mgr, srv)
+
+_ = mgr.Register("db",    closeFn(db.Close),  shutdown.WithPhase(shutdown.PhaseCloseClients))
+_ = mgr.Register("redis", closeFn(rdb.Close), shutdown.WithPhase(shutdown.PhaseCloseClients))
+
+go func() { _ = srv.ListenAndServe() }()
+_ = mgr.Listen(ctx)
 ```
 
-Same execution path as `Listen`.
+`db` and `redis` close in parallel (same phase), but only after `srv.Shutdown` has fully returned in the previous phase.
 
-## Reload signals (SIGHUP)
+### Background worker (actor pattern)
 
-```go
-mgr.OnSignal(syscall.SIGHUP, func(ctx context.Context, _ os.Signal) {
-    config.Reload()
-})
-```
-
-The hook fires; shutdown is NOT triggered. Useful for log rotation (`SIGUSR1`), config reload (`SIGHUP`), and similar gunicorn-style signal patterns.
-
-## Actor pattern (oklog/run-style)
-
-For long-running goroutines (workers, schedulers) where the run loop and the cancel mechanism are distinct:
+When the run loop and the cancel mechanism are distinct goroutines:
 
 ```go
-handle, _ := mgr.RegisterActor("worker", workerStop,
-    shutdown.WithActorPhase(shutdown.PhaseDrainTraffic))
+stop := make(chan struct{})
+
+handle, _ := mgr.RegisterActor("worker", func(_ error) {
+    close(stop) // tell the run loop to exit
+}, shutdown.WithActorPhase(shutdown.PhaseDrainTraffic))
 
 go func() {
-    err := workerLoop()  // blocks until workerStop is called
-    handle.Done(err)     // signals actor completed
+    err := worker.Run(stop) // blocks until stop is closed
+    handle.Done(err)         // tells the manager the actor finished
 }()
 ```
 
-The manager calls `workerStop` during the configured phase, then waits up to the per-actor timeout for `handle.Done` to be called.
+`mgr.Listen` will fire the interrupt, then wait up to `WithActorTimeout` for `handle.Done`.
 
-## Observer pattern
+### Programmatic shutdown — no OS signals
 
-Adapters subscribe to lifecycle callbacks instead of polluting the core:
+Tests, panic-recovery middleware, custom `/admin/shutdown` endpoints, and health-failure paths can drive shutdown directly:
 
 ```go
-mgr.Subscribe(shutdown.Observer{
-    OnPhaseStart: func(p shutdown.Phase, n int) { /* OTEL span start */ },
-    OnPhaseEnd:   func(p shutdown.Phase, dur time.Duration, errs []error) { /* span end */ },
-    OnHandlerEnd: func(name string, p shutdown.Phase, dur time.Duration, err error) { /* prom metric */ },
-    OnComplete:   func(total time.Duration, err error) { /* alert webhook */ },
+mux.HandleFunc("/admin/shutdown", func(w http.ResponseWriter, r *http.Request) {
+    if !authorized(r) { w.WriteHeader(http.StatusForbidden); return }
+    go func() {
+        _ = mgr.Shutdown(context.Background()) // same execution path as a signal
+    }()
+    w.WriteHeader(http.StatusAccepted)
 })
 ```
 
-`shutdown-otel`, `shutdown-prom`, and `shutdown-health` contribs use this pattern.
+### Reload signal (SIGHUP / SIGUSR1) — Gunicorn-style
+
+```go
+mgr.OnSignal(syscall.SIGHUP, func(ctx context.Context, _ os.Signal) {
+    if err := config.Reload(); err != nil {
+        log.Println("reload failed:", err)
+    }
+})
+mgr.OnSignal(syscall.SIGUSR1, func(ctx context.Context, _ os.Signal) {
+    rotateLogFile()
+})
+```
+
+The hook fires; shutdown is NOT triggered. The hooked signal is automatically added to the listened set — no need to also pass it to `WithSignals`.
+
+### Stack three observers at once
+
+The observer pattern is composable: subscribe as many as you like.
+
+```go
+mgr.Subscribe(shutdownzap.Observer(zapLogger))
+mgr.Subscribe(shutdownotel.Observer(tracer))
+mgr.Subscribe(shutdownprom.Observer(promMetrics))
+```
+
+You get structured logs, distributed traces, and metrics from a single shutdown sequence — without any of the contribs knowing about each other.
+
+### Custom observer for ad-hoc telemetry
+
+Don't want a whole contrib for a one-off webhook? Subscribe inline:
+
+```go
+mgr.Subscribe(shutdown.Observer{
+    OnComplete: func(total time.Duration, err error) {
+        status := "success"
+        if err != nil { status = "fail" }
+        _ = postWebhook(map[string]any{
+            "event":    "shutdown_complete",
+            "duration": total.String(),
+            "status":   status,
+        })
+    },
+})
+```
+
+## Error handling
+
+Every handler can return an error. By default the manager runs every phase to completion and returns `errors.Join(...)` of the lot:
+
+```go
+err := mgr.Shutdown(ctx)
+if err != nil {
+    var pe *shutdown.PanicError
+    if errors.As(err, &pe) {
+        log.Printf("handler %q panicked: %v", pe.Name, pe.Value)
+    }
+    log.Printf("shutdown errors: %v", err)
+}
+```
+
+A panicking handler is converted to a `*PanicError` (wrapped in the aggregate) rather than crashing the shutdown goroutine.
+
+Switch to fail-fast with `WithErrorPolicy(StopOnError)` if you'd rather skip subsequent phases on the first failure.
+
+### Exit codes
+
+By default `Listen` returns the error to your caller and you control `os.Exit`. To make the manager exit for you:
+
+```go
+mgr := shutdown.New(
+    shutdown.WithExitOnComplete(0, 1), // success, failure
+)
+_ = mgr.Listen(ctx) // never returns to caller; os.Exit(0|1) at end
+```
+
+A second SIGTERM during shutdown calls `os.Exit(130)` immediately — the operator's escape hatch when something hangs. Tune via `WithForceOnSecondSignal(true, 130)` (or disable with `false, 0`).
+
+## Watchdog
+
+`WithBudget(d)` is the wall-clock budget across all phases. After budget plus a 1-second grace period (`WithWatchdogGrace`), the watchdog calls `os.Exit(failureCode)` even if handlers are still mid-execution. Stuck handler names are logged so you have something to grep for.
+
+```go
+mgr := shutdown.New(
+    shutdown.WithBudget(25*time.Second),    // soft limit
+    shutdown.WithWatchdogGrace(2*time.Second), // after which: os.Exit
+    shutdown.WithExitOnComplete(0, 1),
+)
+```
+
+This is the answer to "k8s SIGKILLs us at `terminationGracePeriodSeconds`": set the budget a few seconds shorter and exit clean before the kernel is involved.
 
 ## Adapters
 
@@ -137,6 +230,8 @@ Adapter modules ship as separate Go modules under `contrib/`. Import only the on
 | [`shutdown-otel`](contrib/shutdown-otel) | `github.com/ubgo/shutdown/contrib/shutdown-otel` | Observer that emits OpenTelemetry spans (root + phase + handler) |
 | [`shutdown-prom`](contrib/shutdown-prom) | `github.com/ubgo/shutdown/contrib/shutdown-prom` | Observer that exports Prometheus metrics |
 
+Runnable end-to-end demos for each pattern live in [`ubgo/shutdown-examples`](https://github.com/ubgo/shutdown-examples).
+
 ## Comparison
 
 | Feature | uber-fx | oklog/run | tokio-graceful-shutdown | terminus | **`ubgo/shutdown`** |
@@ -146,9 +241,9 @@ Adapter modules ship as separate Go modules under `contrib/`. Import only the on
 | Force-exit on second signal | ❌ | ❌ | ✅ | ❌ | **✅** |
 | Watchdog hard-exit | ❌ | ❌ | ✅ | ❌ | **✅** |
 | Observer pattern | ❌ | ❌ | ❌ | ❌ | **✅** |
-| Native readiness drain | ❌ | ❌ | ❌ | ✅ | ✅ (contrib) |
 | Actor (run+interrupt) pairs | ❌ | ✅ | partial | ❌ | **✅** |
 | Reload signal hook | ❌ | ❌ | ❌ | ❌ | **✅** |
+| Panic in handler → aggregate err | ❌ | ❌ | ❌ | ❌ | **✅** |
 | Zero-dep core | ❌ | ✅ | ❌ | ❌ | **✅** |
 
 ## Compatibility

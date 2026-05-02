@@ -62,11 +62,18 @@ func Observer(tracer trace.Tracer) shutdown.Observer {
 	}
 }
 
+// handlerKey scopes a span by phase+name because handler names are unique
+// only within the manager — but a hypothetical adapter that registered the
+// same name across phases would clash without the phase qualifier.
 type handlerKey struct {
 	phase shutdown.Phase
 	name  string
 }
 
+// spanState owns the open spans for one shutdown sequence. The mutex
+// guards every field; the manager fires observer callbacks from multiple
+// goroutines (parallel-within-phase), so concurrent startHandler /
+// endHandler / startPhase calls are normal.
 type spanState struct {
 	mu       sync.Mutex
 	tracer   trace.Tracer

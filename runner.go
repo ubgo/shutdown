@@ -9,8 +9,11 @@ import (
 // runPhase runs all registrations in a phase. When serial==true, handlers
 // run sequentially in name order. Otherwise (default), they run in parallel.
 //
-// Returns the slice of errors observed (empty if every handler succeeded
-// or non-required handlers' errors were filtered out).
+// Errors from each handler are collected into the returned slice in
+// registration order. The serial path also short-circuits on parent
+// cancellation, logging which handlers were skipped — important when a
+// budget overrun cuts a phase short, so the operator knows what didn't
+// run vs what failed.
 func (m *Manager) runPhase(parent context.Context, phase Phase, regs []registration, serial bool) []error {
 	if len(regs) == 0 {
 		return nil

@@ -29,6 +29,13 @@ type actorRegistration struct {
 
 // asHandler wraps the actor's interrupt+completion handshake into a
 // HandlerFunc the manager can place in its phase buckets.
+//
+// The two-step handshake (call interrupt, then wait on `completed`) is
+// what distinguishes an actor from a regular handler: regular handlers
+// own their cleanup synchronously, but an actor's run loop is in another
+// goroutine that the manager does not control. We must signal it AND
+// wait for it — otherwise the next phase could start while the actor is
+// still mid-cleanup.
 func (a *actorRegistration) asHandler() HandlerFunc {
 	return func(ctx context.Context) error {
 		if a.interrupt != nil {
@@ -38,6 +45,12 @@ func (a *actorRegistration) asHandler() HandlerFunc {
 		case <-a.completed:
 			return a.completionErr
 		case <-ctx.Done():
+			// The actor is still running, but we've blown the per-actor
+			// timeout (or the manager budget). Returning ctx.Err() lets
+			// the runner aggregate this as a failure; the actor goroutine
+			// continues to run in the background and may still call
+			// handle.Done eventually — that call is now a no-op (the
+			// channel is closed only the first time).
 			return ctx.Err()
 		}
 	}

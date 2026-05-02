@@ -154,9 +154,20 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	return m.runShutdown(ctx)
 }
 
-// runShutdownWithForceWatch starts shutdown in a goroutine and watches the
-// signal channel for a second signal (force exit) while shutdown is in
-// progress.
+// runShutdownWithForceWatch starts shutdown in a background goroutine and
+// keeps reading from sigCh while it runs.
+//
+// Why a goroutine: runShutdown is synchronous and can take the full budget
+// to return; if we ran it inline we couldn't react to a second signal at
+// all. The select loop here multiplexes "shutdown finished" against
+// "another signal arrived."
+//
+// The loop intentionally continues after a non-force second signal — the
+// operator may have intended a noop (or hooks for that signal are absent)
+// and we need to stay receptive in case more arrive. The loop only exits
+// when shutdown completes (the done case) or force-exit fires (which
+// usually means os.Exit and never returns; the explicit return handles
+// the test path where exitFn is mocked).
 func (m *Manager) runShutdownWithForceWatch(ctx context.Context, sigCh chan os.Signal) error {
 	type result struct{ err error }
 	done := make(chan result, 1)
@@ -171,7 +182,9 @@ func (m *Manager) runShutdownWithForceWatch(ctx context.Context, sigCh chan os.S
 				m.cfg.logger.Warn("shutdown: second signal received — forcing exit",
 					"signal", sig.String(), "exitCode", m.cfg.forceExitCode)
 				m.exitFn(m.cfg.forceExitCode)
-				return nil // unreachable when exitFn is os.Exit; reachable in tests with injected exit fn
+				// Unreachable when exitFn is os.Exit. Returning nil here is
+				// for tests that inject a recording exitFn.
+				return nil
 			}
 			m.cfg.logger.Info("shutdown: second signal received but force-exit disabled",
 				"signal", sig.String())
@@ -276,8 +289,15 @@ func (m *Manager) markClosed() {
 	m.mu.Unlock()
 }
 
-// bucketsByPhase groups registered handlers by phase, returning a map.
-// Actor interrupt handlers are placed in the actor's chosen phase as well.
+// bucketsByPhase groups registered handlers and actor interrupts by phase.
+//
+// Actors and plain handlers are unified into the same registration shape
+// here so the runner doesn't need to know about actors — it just sees
+// HandlerFuncs. The actor's interrupt+wait logic is wrapped by
+// actorRegistration.asHandler.
+//
+// Within a phase we sort by name to get deterministic ordering for the
+// serial path and reproducible test output for the parallel one.
 func (m *Manager) bucketsByPhase() map[Phase][]registration {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

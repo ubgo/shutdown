@@ -259,6 +259,7 @@ func TestShutdown_ObserverCallbacks(t *testing.T) {
 }
 
 func TestShutdown_HandlerPanic_DoesNotBubble(t *testing.T) {
+	t.Helper()
 	m := New(WithLogger(NoopLogger()), WithBudget(2*time.Second))
 	_ = m.Register("panicky", func(_ context.Context) error {
 		panic("boom")

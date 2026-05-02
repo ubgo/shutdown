@@ -17,18 +17,7 @@ jobs:
       matrix:
         module:
           - .
-          - contrib/health-nethttp
-          - contrib/health-gin
-          - contrib/health-chi
-          - contrib/health-echo
-          - contrib/health-fiber
-          - contrib/health-otel
-          - contrib/health-prom
-          - contrib/health-postgres
-          - contrib/health-redis
-          - contrib/health-nats
-          - contrib/health-httpprobe
-          - contrib/health-dns
+          # contrib/* modules will be added here as they ship.
     steps:
       - uses: actions/checkout@v6
 

@@ -105,7 +105,7 @@ func WithExitOnComplete(successCode, failureCode int) Option {
 	}
 }
 
-// WithSerial(phase) opts a specific phase out of parallel handler execution.
+// WithSerial opts a specific phase out of parallel handler execution.
 // By default all handlers in a phase run in parallel.
 func WithSerial(phase Phase) Option {
 	return func(c *config) { c.serialPhases[phase] = true }

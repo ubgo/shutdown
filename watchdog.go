@@ -11,7 +11,7 @@ import (
 //
 // The watchdog only fires if budget > 0; with no budget the process is
 // expected to coordinate its own deadline elsewhere.
-func (m *Manager) startWatchdog(budgetCtx context.Context, start time.Time) func() {
+func (m *Manager) startWatchdog(_ context.Context, start time.Time) func() {
 	if m.cfg.budget <= 0 {
 		return func() {}
 	}

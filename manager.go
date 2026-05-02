@@ -306,17 +306,3 @@ func sortedPhases(buckets map[Phase][]registration) []Phase {
 	sort.Slice(phases, func(i, j int) bool { return phases[i] < phases[j] })
 	return phases
 }
-
-// isShutdownSignal reports whether sig is in the configured shutdown
-// signal set — i.e. should trigger phase execution rather than a custom hook.
-func (m *Manager) isShutdownSignal(sig os.Signal) bool {
-	for _, s := range m.cfg.signals {
-		if s == sig {
-			return true
-		}
-	}
-	if len(m.cfg.signals) == 0 {
-		return sig == syscall.SIGINT || sig == syscall.SIGTERM
-	}
-	return false
-}

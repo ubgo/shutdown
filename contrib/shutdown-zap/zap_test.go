@@ -62,6 +62,7 @@ func TestObserver_OnSignalFires(t *testing.T) {
 }
 
 func TestObserver_NilLoggerDoesNotPanic(t *testing.T) {
+	t.Helper()
 	obs := Observer(nil)
 	obs.OnSignal(syscall.SIGTERM)
 	obs.OnPhaseStart(shutdown.PhaseCloseClients, 1)

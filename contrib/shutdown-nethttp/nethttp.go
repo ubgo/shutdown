@@ -19,9 +19,9 @@ import (
 	"github.com/ubgo/shutdown"
 )
 
-// Default per-handler timeout for HTTP graceful shutdown. Net/http servers
-// usually finish their drain in well under this; the per-call value is
-// still capped by the manager's global budget.
+// DefaultTimeout is the default per-handler timeout for HTTP graceful
+// shutdown. Net/http servers usually finish their drain in well under
+// this; the per-call value is still capped by the manager's global budget.
 const DefaultTimeout = 10 * time.Second
 
 // Option configures a Register call.

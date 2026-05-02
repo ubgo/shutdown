@@ -22,8 +22,11 @@ import (
 	"github.com/ubgo/shutdown"
 )
 
+// DefaultTimeout is the default per-handler timeout for the Gin server's
+// graceful shutdown.
 const DefaultTimeout = 10 * time.Second
 
+// Option configures Register.
 type Option func(*config)
 
 type config struct {
@@ -32,8 +35,16 @@ type config struct {
 	timeout time.Duration
 }
 
-func WithName(s string) Option          { return func(c *config) { c.name = s } }
+// WithName overrides the handler name registered with the manager.
+// Default: "gin.Server".
+func WithName(s string) Option { return func(c *config) { c.name = s } }
+
+// WithPhase places the Gin shutdown in a specific phase.
+// Default: shutdown.PhaseStopAccepting.
 func WithPhase(p shutdown.Phase) Option { return func(c *config) { c.phase = p } }
+
+// WithTimeout caps the time spent inside srv.Shutdown.
+// Default: DefaultTimeout.
 func WithTimeout(d time.Duration) Option {
 	return func(c *config) { c.timeout = d }
 }
